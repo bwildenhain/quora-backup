@@ -141,8 +141,11 @@ for e in answers:
     elif not m2 is None:
         filename += m2.group(1)
     else:
-        print('[ERROR] Could not find question part of URL %s; skipping' % url, file=sys.stderr)
-        continue
+        # blog post
+        m3 = re.search('quora\.com/([^/]+)', url)
+        filename += m3.group(1)
+        #print('[ERROR] Could not find question part of URL %s; skipping' % url, file=sys.stderr)
+        #continue
     # Trim the filename if it's too long. 255 bytes is the limit on many filesystems.
     total_byte_length = len(bytes(filename + '.html', encoding="utf-8"))
     filename_bytes = bytes(filename, encoding="utf-8")

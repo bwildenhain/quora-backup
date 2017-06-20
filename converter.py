@@ -26,6 +26,61 @@ def get_text_content(node):
             text += text_node.data
     return text
 
+# Given origin (timestamp offset by time zone) and string from Quora, e.g.
+# "Added 31 Jan", returns a string such as '2015-01-31'.
+# Quora's short date strings don't provide enough information to determine the
+# exact time, unless it was within the last day, so we won't bother to be any
+# more precise.
+def parse_quora_date(origin, date_str):
+    days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    months_of_year = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    m0 = re.match('just now$', date_str)
+    m1 = re.match('(\d+)m ago$', date_str)
+    m2 = re.match('(\d+)h ago$', date_str)
+    m3 = re.match('(' + '|'.join(days_of_week) + ')$', date_str)
+    m4 = re.match('(' + '|'.join(months_of_year) + ') (\d+)$', date_str)
+    m5 = re.match('(' + '|'.join(months_of_year) + ') (\d+), (\d+)$', date_str)
+    m6 = re.match('(\d+)[ap]m$', date_str)
+    if not m0 is None or not m6 is None:
+        # Using origin for time in am / pm since the time of the day will be discarded anyway
+        tm = time.gmtime(origin)
+    elif not m1 is None:
+        tm = time.gmtime(origin - 60*int(m1.group(1)))
+    elif not m2 is None:
+        tm = time.gmtime(origin - 3600*int(m2.group(1)))
+    elif not m3 is None:
+        # Walk backward until we reach the given day of the week
+        day_of_week = days_of_week.index(m3.group(1))
+        offset = 1
+        while offset <= 7:
+            tm = time.gmtime(origin - 86400*offset)
+            if tm.tm_wday == day_of_week:
+                break
+            offset += 1
+        else:
+            raise ValueError('date "%s" is invalid' % date_str) 
+    elif not m4 is None:
+        # Walk backward until we reach the given month and year
+        month_of_year = months_of_year.index(m4.group(1)) + 1
+        day_of_month = int(m4.group(2))
+        offset = 1
+        while offset <= 366:
+            tm = time.gmtime(origin - 86400*offset)
+            if tm.tm_mon == month_of_year and tm.tm_mday == day_of_month:
+                break
+            offset += 1
+        else:
+            raise ValueError('date "%s" is invalid' % date_str)
+    elif not m5 is None:
+        # may raise ValueError
+        tm = time.strptime(date_str, '%b %d, %Y') 
+    else:       
+        raise ValueError('date "%s" could not be interpreted' % date_str)
+    #return '%d-%02d-%02d' % (tm.tm_year, tm.tm_mon, tm.tm_mday)
+    return '%s %d, %d' % (months_of_year[tm.tm_mon], tm.tm_mday, tm.tm_year)
+                    
+
+
 # The HTML can mostly be saved as-is. The main changes we want to make are:
 # 1) Remove extraneous <span>s
 # 2) Rewrite relative paths ("/Brian-Bi") to full URLs
@@ -196,9 +251,24 @@ parser.add_argument('output_dir', nargs='?', default='./quora-answers-cooked', h
 parser.add_argument('-d', '--delay', default=0, type=float, help='Time to sleep between downloads, in seconds')
 parser.add_argument('-n', '--no_download', action='store_true', help='Do not save images')
 parser.add_argument('-v', '--verbose', action='store_true', help='be verbose')
+parser.add_argument('-t', '--origin_timestamp', default=None, type=int, help='JS time when the list of URLs was fetched')
+parser.add_argument('-z', '--origin_timezone', default=None, type=int, help='browser timezone')
 
 global args
 args = parser.parse_args()
+
+# Determine the origin for relative date computation
+if args.origin_timestamp is None:
+    log_if_v('Using current time')
+    args.origin_timestamp = time.time()
+else:
+    args.origin_timestamp //= 1000
+if args.origin_timezone is None:
+    log_if_v('Using system time zone')
+    args.origin_timezone = time.timezone
+else:
+    args.origin_timezone *= 60
+origin = args.origin_timestamp - args.origin_timezone
 
 # Get a list of answers to convert...
 filenames = list(filter(lambda f: f.endswith('.html'), os.listdir(args.input_dir)))
@@ -227,6 +297,7 @@ for filename in filenames:
         print('[ERROR] Failed to read %s (%s)' % (filename, error.strerror))
         continue
 
+    #print(page_html)
     # Get the HTML element containing just the answer itself.
     # Also get the title.
     parser = HTMLParser(tree=treebuilders.getTreeBuilder('dom'))
@@ -235,14 +306,36 @@ for filename in filenames:
     log_if_v('Title: ' + ('(could not be determined)' if title_node is None else get_text_content(title_node)))
 
     answer_node = None
+    question_node = None
+    date_node = None
     for node in document.getElementsByTagName('div'):
+        #print(node.getAttribute('id'))
+        #print(node.getAttribute('class').split())
         if 'ExpandedAnswer' in node.getAttribute('class').split():
             try:
                 answer_node = node
             except Exception:
                 pass
-            break
+        elif 'ans_page_question_header' in node.getAttribute('class').split():
+            try:
+                question_node = node
+            except Exception:
+                pass
+        elif 'CredibilityFacts' in node.getAttribute('class').split():
+            try:
+                date_node = node
+                # convert date to consistent MMM, DD, YYYY
+                text = date_node.getElementsByTagName('a')[0].firstChild.nodeValue
+                matchObj = re.match(r'Answered (.+ ago)', text)
+                if matchObj:
+                    new_time = parse_quora_date(origin, matchObj.group(1))                    
+                    date_node.getElementsByTagName('a')[0].firstChild.nodeValue = 'Answered %s' % new_time
+            except Exception:
+                pass
     if answer_node is None:
+        print('[WARNING] Failed to locate answer on page (Source URL was %s)' % url, file=sys.stderr)
+        continue
+    if question_node is None:
         print('[WARNING] Failed to locate answer on page (Source URL was %s)' % url, file=sys.stderr)
         continue
 
@@ -256,7 +349,9 @@ for filename in filenames:
     head_node.appendChild(meta_node)
     css = ("blockquote { border-left: 2px solid #ddd; color: #666; margin: 0; padding-left: 16px; } "
            "code, pre { background: #f4f4f4; } "
+	   "h1 a { text-decoration:none; } "
            "pre, h2 { margin: 0; } "
+	   ".CredibilityFacts { text-align: right; font-style: italic; } "
            "ul { margin: 0 0 0 16px; padding: 8px 0; } "
            "ol { margin: 0 0 0 28px; padding: 8px 0; } "
            "li { margin: 0 0 8px; } ")
@@ -266,14 +361,27 @@ for filename in filenames:
     head_node.appendChild(style_node)
     new_page.appendChild(head_node)
     body_node = document.createElement('body')
+    answer_out_node = document.createElement('div')
+    question_out_node = document.createElement('div')
+    body_node.appendChild(question_out_node)
+    fleuron = document.createTextNode(u'\u2766')
+    qn_div = document.createElement('p')
+    qn_div.setAttribute('style', 'text-align: center;')
+    body_node.appendChild(qn_div)
+    qn_div.appendChild(fleuron)
+    body_node.appendChild(answer_out_node)
+    body_node.appendChild(date_node)
     # This step processes Quora's HTML into a more lightweight and portable form.
-    cleanup_tree(document, answer_node, body_node)
+    cleanup_tree(document, question_node, question_out_node)
+    cleanup_tree(document, answer_node, answer_out_node)
     new_page.appendChild(body_node)
     # Okay! Finally, save the HTML.
-    walker = treewalkers.getTreeWalker('dom')(new_page)
+    #walker = treewalkers.getTreeWalker('dom')(new_page)
     try:
         with open(args.output_dir + '/' + filename, 'wb', 0o600) as saved_page:
-            saved_page.write(b'<!DOCTYPE html>')
+            #saved_page.write(b'<!DOCTYPE html>')
+            #saved_page.write(serializer.htmlserializer.HTMLSerializer(omit_optional_tags=False).render(walker))
+            #saved_page.write(serializer.HTMLSerializer(omit_optional_tags=False).render(walker, 'utf-8'))
             saved_page.write(serializer.serialize(new_page, 'dom', 'utf-8', omit_optional_tags=False))
     except IOError as error:
         print('[ERROR] Failed to save to file %s (%s)' % (filename, error.strerror), file=sys.stderr)
