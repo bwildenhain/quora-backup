@@ -104,10 +104,24 @@ def cleanup_tree(doc, src, dest):
         # Otherwise, it's an element node.
         if child.tagName in ['br', 'hr']:
             dest.appendChild(child.cloneNode(False))
-        elif child.tagName in ['b', 'i', 'u', 'h2', 'ol', 'ul', 'li', 'blockquote', 'wbr']:
+        elif child.tagName in ['b', 'i', 'u', 'h1', 'h2', 'ol', 'ul', 'li', 'blockquote', 'wbr', 'p']:
             # This node doesn't need to be modified but its children might.
             new_node = doc.createElement(child.tagName)
             cleanup_tree(doc, child, new_node)
+            dest.appendChild(new_node)
+        elif 'question_text' in child.getAttribute('class'):
+            # enforce h1, which Quora no longer adds
+            print('[WARNING] ZN', file=sys.stderr)
+            new_node = doc.createElement('h1')
+            new_node.appendChild(child)
+            #cleanup_tree(doc, child, new_node)
+            dest.appendChild(new_node)
+        elif 'board_item_title' in child.getAttribute('class'):
+            # enforce h1, which Quora no longer adds
+            print('[WARNING] ZN', file=sys.stderr)
+            new_node = doc.createElement('h1')
+            new_node.appendChild(child)
+            #cleanup_tree(doc, child, new_node)
             dest.appendChild(new_node)
         elif child.getAttribute('data-embed') != '':
             # This is a video. We want to copy the data-embed value, which is HTML for an iframe node.
@@ -241,7 +255,7 @@ def cleanup_tree(doc, src, dest):
                 print('[WARNING] Failed to parse code block', file=sys.stderr)
                 dest.appendChild(child.cloneNode(True))
         else:
-            print('[WARNING] Unrecognized node', file=sys.stderr)
+            print('[WARNING] Unrecognized node %s' % child.tagName , file=sys.stderr)
             # Bail out by just copying the original HTML
             dest.appendChild(child.cloneNode(True))
 
@@ -307,6 +321,7 @@ for filename in filenames:
 
     answer_node = None
     question_node = None
+    post_node = None
     date_node = None
     for node in document.getElementsByTagName('div'):
         #print(node.getAttribute('id'))
@@ -316,7 +331,17 @@ for filename in filenames:
                 answer_node = node
             except Exception:
                 pass
+        elif 'ExpandedPostContent' in node.getAttribute('class').split():
+            try:
+                post_node = node
+            except Exception:
+                pass
         elif 'ans_page_question_header' in node.getAttribute('class').split():
+            try:
+                question_node = node
+            except Exception:
+                pass
+        elif 'BoardItem' in node.getAttribute('class').split():
             try:
                 question_node = node
             except Exception:
@@ -332,7 +357,18 @@ for filename in filenames:
                     date_node.getElementsByTagName('a')[0].firstChild.nodeValue = 'Answered %s' % new_time
             except Exception:
                 pass
-    if answer_node is None:
+        elif 'PostFooter' in node.getAttribute('class').split():
+            try:
+                date_node = node
+                # convert date to consistent MMM, DD, YYYY
+                text = date_node.getElementsByTagName('a')[0].firstChild.nodeValue
+                matchObj = re.match(r'Posted (.+ ago)', text)
+                if matchObj:
+                    new_time = parse_quora_date(origin, matchObj.group(1))                    
+                    date_node.getElementsByTagName('a')[1].firstChild.nodeValue = 'Posted %s' % new_time
+            except Exception:
+                pass
+    if answer_node is None and post_node is None:
         print('[WARNING] Failed to locate answer on page (Source URL was %s)' % url, file=sys.stderr)
         continue
     if question_node is None:
@@ -363,7 +399,8 @@ for filename in filenames:
     body_node = document.createElement('body')
     answer_out_node = document.createElement('div')
     question_out_node = document.createElement('div')
-    body_node.appendChild(question_out_node)
+    if not question_node is None:
+        body_node.appendChild(question_out_node)
     fleuron = document.createTextNode(u'\u2766')
     qn_div = document.createElement('p')
     qn_div.setAttribute('style', 'text-align: center;')
@@ -372,8 +409,12 @@ for filename in filenames:
     body_node.appendChild(answer_out_node)
     body_node.appendChild(date_node)
     # This step processes Quora's HTML into a more lightweight and portable form.
-    cleanup_tree(document, question_node, question_out_node)
-    cleanup_tree(document, answer_node, answer_out_node)
+    if not question_node is None:
+        cleanup_tree(document, question_node, question_out_node)
+    if post_node is None:
+        cleanup_tree(document, answer_node, answer_out_node)
+    else:
+        cleanup_tree(document, post_node, answer_out_node)
     new_page.appendChild(body_node)
     # Okay! Finally, save the HTML.
     #walker = treewalkers.getTreeWalker('dom')(new_page)
