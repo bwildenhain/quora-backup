@@ -111,14 +111,12 @@ def cleanup_tree(doc, src, dest):
             dest.appendChild(new_node)
         elif 'question_text' in child.getAttribute('class'):
             # enforce h1, which Quora no longer adds
-            print('[WARNING] ZN', file=sys.stderr)
             new_node = doc.createElement('h1')
             new_node.appendChild(child)
             #cleanup_tree(doc, child, new_node)
             dest.appendChild(new_node)
         elif 'board_item_title' in child.getAttribute('class'):
             # enforce h1, which Quora no longer adds
-            print('[WARNING] ZN', file=sys.stderr)
             new_node = doc.createElement('h1')
             new_node.appendChild(child)
             #cleanup_tree(doc, child, new_node)
