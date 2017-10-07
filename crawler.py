@@ -18,20 +18,37 @@ def log_if_v(msg):
 # Quora's short date strings don't provide enough information to determine the
 # exact time, unless it was within the last day, so we won't bother to be any
 # more precise.
-def parse_quora_date(origin, quora_str):
-    days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    months_of_year = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    _, _, date_str = quora_str.partition('Added ')
-    date_str = date_str.strip()
-    if date_str == '':
-        raise ValueError('"%s" does not appear to indicate when answer was added' % quora_str)
-    m0 = re.match('just now$', date_str)
-    m1 = re.match('(\d+)m ago$', date_str)
-    m2 = re.match('(\d+)h ago$', date_str)
-    m3 = re.match('(' + '|'.join(days_of_week) + ')$', date_str)
-    m4 = re.match('(' + '|'.join(months_of_year) + ') (\d+)$', date_str)
-    m5 = re.match('(' + '|'.join(months_of_year) + ') (\d+), (\d+)$', date_str)
-    m6 = re.match('(\d+)[ap]m$', date_str)
+def parse_quora_date(origin, quora_str, lang):
+    if lang == 'de':
+        days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        months_of_year = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
+        _, _, date_str = quora_str.partition('Hinzugefügt ')
+        date_str = date_str.strip()
+        if date_str == '':
+            raise ValueError('"%s" does not appear to indicate when answer was added' % quora_str)
+        m0 = re.match('Gerade hinzugefügt$', quora_str) # TODO: test me
+        m1 = re.match('vor (\d+) m$', date_str)
+        m2 = re.match('vor (\d+) h$', date_str) # TODO: test me
+        m3 = re.match('(' + '|'.join(days_of_week) + ')$', date_str) # TODO 
+        m4 = re.match('am (\d+)\. (' + '|'.join(months_of_year) + ')$', date_str)
+        position={'month': 2, 'day': 1}
+        m5 = re.match('(' + '|'.join(months_of_year) + ') (\d+), (\d+)$', date_str) # TODO 
+        m6 = re.match('(\d+)[ap]m$', date_str)
+    else:
+        days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        months_of_year = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        _, _, date_str = quora_str.partition('Added ')
+        date_str = date_str.strip()
+        if date_str == '':
+            raise ValueError('"%s" does not appear to indicate when answer was added' % quora_str)
+        m0 = re.match('just now$', date_str)
+        m1 = re.match('(\d+)m ago$', date_str)
+        m2 = re.match('(\d+)h ago$', date_str)
+        m3 = re.match('(' + '|'.join(days_of_week) + ')$', date_str)
+        m4 = re.match('(' + '|'.join(months_of_year) + ') (\d+)$', date_str)
+        position={'month': 1, 'day': 2}
+        m5 = re.match('(' + '|'.join(months_of_year) + ') (\d+), (\d+)$', date_str)
+        m6 = re.match('(\d+)[ap]m$', date_str)
     if not m0 is None or not m6 is None:
         # Using origin for time in am / pm since the time of the day will be discarded anyway
         tm = time.gmtime(origin)
@@ -52,8 +69,8 @@ def parse_quora_date(origin, quora_str):
             raise ValueError('date "%s" is invalid' % date_str)
     elif not m4 is None:
         # Walk backward until we reach the given month and year
-        month_of_year = months_of_year.index(m4.group(1)) + 1
-        day_of_month = int(m4.group(2))
+        month_of_year = months_of_year.index(m4.group(position['month'])) + 1
+        day_of_month = int(m4.group(position['day']))
         offset = 1
         while offset <= 366:
             tm = time.gmtime(origin - 86400*offset)
@@ -121,11 +138,12 @@ download_file_count = 0
 for e in answers:
     sys.stderr.flush()
     url = e[0]
+    lang = url.split('://')[1].split('.')[0]
     print('URL: %s' % url, file=sys.stderr)
 
     # Determine the date when this answer was written
     try:
-        added_time = parse_quora_date(origin, e[1])
+        added_time = parse_quora_date(origin, e[1], lang)
     except ValueError as error:
         print('[WARNING] Failed to parse date: %s' % str(error), file=sys.stderr)
         added_time = 'xxxx-xx-xx'

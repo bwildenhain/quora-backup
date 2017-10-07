@@ -1,1 +1,4 @@
 *.swp
+answers.json
+quora-answers
+__pycache__/
