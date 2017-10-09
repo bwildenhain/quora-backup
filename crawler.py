@@ -20,16 +20,16 @@ def log_if_v(msg):
 # more precise.
 def parse_quora_date(origin, quora_str, lang):
     if lang == 'de':
-        days_of_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        days_of_week = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
         months_of_year = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
-        _, _, date_str = quora_str.partition('Hinzugefügt ')
+        date_str = re.sub(" *[Hh]inzugefügt *", '', quora_str)
         date_str = date_str.strip()
         if date_str == '':
             raise ValueError('"%s" does not appear to indicate when answer was added' % quora_str)
-        m0 = re.match('Gerade hinzugefügt$', quora_str) # TODO: test me
-        m1 = re.match('vor (\d+) m$', date_str)
-        m2 = re.match('vor (\d+) h$', date_str) # TODO: test me
-        m3 = re.match('(' + '|'.join(days_of_week) + ')$', date_str) # TODO 
+        m0 = re.match('Gerade$', date_str) # TODO: test me
+        m1 = re.match('[Vv]or (\d+) ?m$', date_str)
+        m2 = re.match('[Vv]or (\d+) ?h$', date_str) # TODO: test me
+        m3 = re.match('am (' + '|'.join(days_of_week) + ')$', date_str)
         m4 = re.match('am (\d+)\. (' + '|'.join(months_of_year) + ')$', date_str)
         position={'month': 2, 'day': 1}
         m5 = re.match('(' + '|'.join(months_of_year) + ') (\d+), (\d+)$', date_str) # TODO 
